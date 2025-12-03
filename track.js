@@ -84,59 +84,12 @@ export class TrackManager {
         mesh.position.copy(midpoint);
 
         // 2. Rotate
-        // Base orientation: Plane is XY.
-        // We want it facing along Dir (Z) and pitched by Slope.
-        
-        // Calculate Yaw
-        const yaw = Math.atan2(this.currentDir.x, this.currentDir.z);
-        
-        // Create rotation matrix
-        // Order: Yaw (Y) then Pitch (X). 
-        // Note: Plane default normal is +Z? No, PlaneGeometry is on XY plane, normal +Z.
-        // We want "forward" to be along the road. 
-        // Let's rotate -PI/2 on X to make it flat (facing +Y, forward -Z).
-        // Then apply our rotations.
-        
+        // Use YXZ order to prevent gimbal lock issues and ensure correct orientation
+        // Yaw (Y) first to face direction, then Pitch (X) for slope
         mesh.rotation.order = 'YXZ';
-        mesh.rotation.y = yaw;
-        mesh.rotation.x = -Math.PI / 2 - slope; // Pitch up is negative rotation around X in this setup? 
-        // If plane is flat (X=-90deg), local Z is pointing UP. Local Y is pointing Forward.
-        // Wait, PlaneGeometry(w, h): width along X, height along Y.
-        // RotX(-90): width along X, height along -Z. Normal +Y.
-        // So "Forward" is -Z.
-        // If we want to slope UP, we need to lift the far end.
-        // That corresponds to rotating around X axis.
-        // Positive Slope (Up) -> Positive Rotation around X? 
-        // Let's visualize: Flat is -90. Tilted up 45 deg is -45. So yes, add slope.
+        mesh.rotation.y = Math.atan2(this.currentDir.x, this.currentDir.z) + Math.PI;
         mesh.rotation.x = -Math.PI / 2 + slope;
-        
-        // Fix Z rotation (Yaw) logic if needed? 
-        // Actually, PlaneGeometry starts aligned with Y axis.
-        // If we rotate X -90, it aligns with -Z.
-        // If our yaw is 0 (Looking +Z), we need to rotate Y by PI.
-        // Let's just use lookAt for simplicity on the position?
-        // No, `lookAt` is messy with banking/slope. Explicit Euler is better.
-        
-        // Re-do Mesh Rotation Logic strictly:
-        // Default: Up (+Y), Normal (+Z).
-        // We want: Along Heading, Tilted by Slope.
-        // 1. Reset
-        mesh.rotation.set(0, 0, 0);
-        // 2. Rotate to face Heading (Yaw)
-        mesh.rotation.y = Math.atan2(this.currentDir.x, this.currentDir.z); 
-        // 3. Tilt (Pitch) - relative to local X
-        // Initial state is vertical wall facing Z.
-        // Rotate X -90 to make it floor.
-        // Add slope.
-        mesh.rotation.x = -Math.PI / 2 + slope; 
-        
-        // Adjust for PlaneGeometry alignment
-        // PlaneGeometry builds along Y axis. When rotated -90 X, it points along -Z.
-        // If currentDir is (0,0,1), atan2 is 0. Mesh points -Z. Wrong.
-        // We need to rotate Y by PI to face +Z.
-        mesh.rotation.y += Math.PI;
 
-        // Store precise rotation for OBB checks if needed, but we use simplified logic.
         seg.angle = mesh.rotation.y; // Yaw
 
         this.scene.add(mesh);
@@ -199,7 +152,7 @@ export class TrackManager {
             // Let's effectively pause slope during the corner block to keep it sane.
             // So Corner is FLAT (Slope 0).
             
-            cornerMesh.rotation.set(0, 0, 0);
+            cornerMesh.rotation.order = 'YXZ';
             cornerMesh.rotation.y = Math.atan2(this.currentDir.x, this.currentDir.z) + Math.PI;
             cornerMesh.rotation.x = -Math.PI / 2; // Flat
 

@@ -316,9 +316,9 @@ export class Car {
                 const carY = this.position.y;
                 
                 // Snap to road
-                // Smooth damping
+                // Smooth damping - Increased speed to prevent clipping on steep inclines
                 const diff = roadY - carY;
-                this.position.y += diff * 10 * dt;
+                this.position.y += diff * 35 * dt;
                 
                 // Match Pitch
                 targetPitch = -trackState.slope; // Pitch up is negative rotation in 3JS obj usually? 
