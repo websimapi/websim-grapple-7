@@ -73,6 +73,15 @@ export class TrackManager {
 
         // Visuals
         const geo = new THREE.PlaneGeometry(this.width, length);
+
+        // Fix texture tiling based on length to prevent stretching
+        const uvs = geo.attributes.uv;
+        const tileFactor = length / 20; // 20 units per tile repeat
+        for (let i = 0; i < uvs.count; i++) {
+            uvs.setY(i, uvs.getY(i) * tileFactor);
+        }
+        geo.attributes.uv.needsUpdate = true;
+
         const mesh = new THREE.Mesh(geo, this.roadMat);
         
         // Orient the mesh

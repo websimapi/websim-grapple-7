@@ -317,36 +317,57 @@ export class Car {
             
             // Vertical Physics (Gravity + Road Snap)
             if (trackState.onTrack) {
-                const roadY = trackState.height;
-                const carY = this.position.y;
+                // 2-Point Suspension Logic for smooth ramp transitions
+                const lookAhead = 1.8;
+                const fwd = this.direction.clone().normalize();
                 
-                // Snap to road
-                // Smooth damping - Increased speed to prevent clipping on steep inclines
-                const diff = roadY - carY;
-                this.position.y += diff * 35 * dt;
+                // Sample points ahead and behind to look for slope changes
+                const pFront = this.position.clone().add(fwd.clone().multiplyScalar(lookAhead));
+                const pRear = this.position.clone().add(fwd.clone().multiplyScalar(-lookAhead));
                 
-                // Match Road Orientation (Align Up vector to Road Normal)
-                if (trackState.segment) {
-                    // Get road normal from segment mesh rotation
-                    // PlaneGeometry default normal is (0,0,1). Apply mesh rotation.
-                    const segQuat = new THREE.Quaternion().setFromEuler(trackState.segment.mesh.rotation);
-                    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(segQuat);
-                    
-                    const forward = this.direction.clone().normalize();
-                    // Calculate Right vector: Cross(Normal, Forward). (Y x Z = X)
-                    const right = new THREE.Vector3().crossVectors(normal, forward).normalize();
-                    // Re-calculate Forward to ensure orthogonality: Cross(Right, Normal). (X x Y = Z)
-                    const realForward = new THREE.Vector3().crossVectors(right, normal).normalize();
-                    
-                    // Create rotation matrix from basis vectors (Right, Up, Forward)
-                    // Matches Car Model: +X Right, +Y Up, +Z Front
-                    const rotMat = new THREE.Matrix4().makeBasis(right, normal, realForward);
-                    targetQuat.setFromRotationMatrix(rotMat);
+                // Get track height at samples
+                const sFront = trackManager.getTrackState(pFront);
+                const sRear = trackManager.getTrackState(pRear);
+                
+                let targetY = trackState.height;
+                let terrainNormal = new THREE.Vector3(0, 1, 0);
+                let terrainForward = fwd;
 
-                } else {
-                    const yaw = Math.atan2(this.direction.x, this.direction.z);
-                    targetQuat.setFromEuler(new THREE.Euler(0, yaw, 0, 'XYZ'));
+                // If both samples are on track, calculate exact pitch from geometry
+                if (sFront.onTrack && sRear.onTrack) {
+                    const hFront = sFront.height;
+                    const hRear = sRear.height;
+                    targetY = (hFront + hRear) / 2;
+                    
+                    // Create slope vector
+                    const pF = pFront.clone(); pF.y = hFront;
+                    const pR = pRear.clone(); pR.y = hRear;
+                    terrainForward = new THREE.Vector3().subVectors(pF, pR).normalize();
+                    
+                    // Derive Normal and Right from Forward + Global Up
+                    const globalUp = new THREE.Vector3(0, 1, 0);
+                    const tRight = new THREE.Vector3().crossVectors(globalUp, terrainForward).normalize();
+                    // Recalculate normal to be orthogonal to new forward
+                    terrainNormal = new THREE.Vector3().crossVectors(terrainForward, tRight).normalize();
+                } 
+                else if (trackState.segment) {
+                    // Fallback to single segment orientation
+                    const segQuat = new THREE.Quaternion().setFromEuler(trackState.segment.mesh.rotation);
+                    terrainNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(segQuat);
                 }
+
+                // Snap to road with damping
+                const diff = targetY - this.position.y;
+                this.position.y += diff * 25 * dt;
+                
+                // Construct Rotation Basis
+                // Right = Cross(Normal, Forward) -> Ensures no roll unless normal dictates it
+                // Forward = Cross(Right, Normal) -> Aligns with slope
+                const right = new THREE.Vector3().crossVectors(terrainNormal, terrainForward).normalize();
+                const realForward = new THREE.Vector3().crossVectors(right, terrainNormal).normalize();
+                
+                const rotMat = new THREE.Matrix4().makeBasis(right, terrainNormal, realForward);
+                targetQuat.setFromRotationMatrix(rotMat);
                 
                 this.verticalVelocity = 0;
             } else {
