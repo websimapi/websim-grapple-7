@@ -432,10 +432,14 @@ export class TrackManager {
     getNearestPost(position) {
         let nearest = null;
         let minDist = Infinity;
-        const checkCount = Math.min(this.posts.length, 4);
+        const checkCount = Math.min(this.posts.length, 20);
         const startIndex = this.posts.length - checkCount;
         for (let i = startIndex; i < this.posts.length; i++) {
             const post = this.posts[i];
+            
+            // Filter out posts that are on different height levels (overpasses/underpasses)
+            if (Math.abs(post.position.y - position.y) > 15) continue;
+
             const dist = position.distanceTo(post.position);
             if (dist < minDist) {
                 minDist = dist;
