@@ -230,18 +230,21 @@ export class TrackManager {
         // We only care if we are overlapping in XZ AND close in Y.
         
         // Optimisation: only check last 50 segments
-        const checkCount = Math.min(this.segments.length, 50);
+        const checkCount = Math.min(this.segments.length, 100);
         const start = Math.max(0, this.segments.length - checkCount);
         
         for (let i = start; i < this.segments.length - 2; i++) { // Don't check immediate neighbors
             const seg = this.segments[i];
             
-            // Check Y distance
-            const yDist = Math.abs(seg.start.y - height);
-            if (yDist > 15) continue; // Clear vertical separation
+            // Check Y relative position
+            // We strictly avoid generating new track BELOW existing track (Underpass) as it blocks the camera.
+            // We allow generating ABOVE existing track (Overpass) if there is enough clearance.
+            
+            const isOverpass = height > (seg.start.y + 20);
+            
+            if (isOverpass) continue; // Safe overpass, ignore XZ overlap
 
-            // Check XZ overlap
-            // Using simple distance check as heuristic before expensive OBB
+            // If not an overpass (meaning level or below), check XZ overlap
             const dist = new THREE.Vector2(box.center.x, box.center.z).distanceTo(new THREE.Vector2(seg.mesh.position.x, seg.mesh.position.z));
             const maxRadius = Math.max(box.length, seg.length) / 2 + Math.max(box.width, seg.width) / 2;
             
@@ -295,13 +298,8 @@ export class TrackManager {
             angle: 0
         }, this.currentPos.y)) {
             // Collision detected!
-            // Change slope to go UP/DOWN aggressively?
-            // Or just swap to a slope if we were flat.
-            if (slope === 0) {
-                slope = 0.35; // Steep climb
-            } else {
-                slope = -slope; // Invert logic
-            }
+            // Strategy: Force a climb to become an Overpass.
+            slope = 0.35; 
             
             // If turn, cancel turn and go straight up to clear obstacle
             if (type === 'turn') {
