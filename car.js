@@ -4,6 +4,7 @@ export class Car {
     constructor(scene) {
         this.scene = scene;
         this.mesh = new THREE.Group();
+        this.mesh.rotation.order = 'YXZ';
         
         // Physics state
         this.position = new THREE.Vector3(0, 1, 0);

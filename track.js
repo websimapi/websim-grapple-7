@@ -88,7 +88,7 @@ export class TrackManager {
         // Yaw (Y) first to face direction, then Pitch (X) for slope
         mesh.rotation.order = 'YXZ';
         mesh.rotation.y = Math.atan2(this.currentDir.x, this.currentDir.z) + Math.PI;
-        mesh.rotation.x = -Math.PI / 2 + slope;
+        mesh.rotation.x = -Math.PI / 2 - slope;
 
         seg.angle = mesh.rotation.y; // Yaw
 
