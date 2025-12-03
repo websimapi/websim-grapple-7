@@ -236,20 +236,15 @@ export class TrackManager {
         for (let i = start; i < this.segments.length - 2; i++) { // Don't check immediate neighbors
             const seg = this.segments[i];
             
-            // Check Y relative position
-            // We strictly avoid generating new track BELOW existing track (Underpass) as it blocks the camera.
-            // We allow generating ABOVE existing track (Overpass) if there is enough clearance.
-            
-            const isOverpass = height > (seg.start.y + 20);
-            
-            if (isOverpass) continue; // Safe overpass, ignore XZ overlap
+            // STRICT COLLISION CHECK: Prevent any XZ overlap regardless of height
+            // We removed the 'isOverpass' check to prevent visual obstruction/stacking
 
-            // If not an overpass (meaning level or below), check XZ overlap
+            // Check XZ overlap
             const dist = new THREE.Vector2(box.center.x, box.center.z).distanceTo(new THREE.Vector2(seg.mesh.position.x, seg.mesh.position.z));
             const maxRadius = Math.max(box.length, seg.length) / 2 + Math.max(box.width, seg.width) / 2;
             
             if (dist < maxRadius) {
-                // Potential overlap, assume collision for safety to force overpass
+                // Potential overlap, assume collision
                 return true;
             }
         }
@@ -257,58 +252,74 @@ export class TrackManager {
     }
 
     generateNextSegment() {
-        const rand = Math.random();
-        
-        // Decide segment parameters
-        let type = 'straight';
-        let length = 80 + Math.random() * 60;
-        let turnDir = 0;
-        let slope = 0;
-
-        // Turn Logic
-        if (rand > 0.6) { // 40% chance of turn
-            type = 'turn';
-            turnDir = Math.random() > 0.5 ? 1 : -1;
-            length = 50 + Math.random() * 30; // Straights leading to turns are shorter
-            // Turns force flat slope in current implementation
-            slope = 0;
-        } else {
-            // Straight Logic - Chance for Slope
-            const slopeRand = Math.random();
-            if (slopeRand < 0.3) {
-                slope = 0.2; // Up ~11 deg
-            } else if (slopeRand < 0.6) {
-                slope = -0.2; // Down
-            } else {
-                slope = 0;
-            }
-        }
-
-        // Lookahead / Collision Avoidance
-        // Project where this segment would land
-        const tempHorizLen = length * Math.cos(slope);
-        const centerOffset = this.currentDir.clone().multiplyScalar(tempHorizLen / 2);
-        const projectedCenter = this.currentPos.clone().add(centerOffset);
-        
-        // If we detect collision, try to force a slope change to clear it
-        if (this.checkCollision({
-            center: projectedCenter,
-            width: this.width,
-            length: tempHorizLen,
-            angle: 0
-        }, this.currentPos.y)) {
-            // Collision detected!
-            // Strategy: Force a climb to become an Overpass.
-            slope = 0.35; 
+        // Helper to check a candidate segment for collision
+        const checkCandidate = (candidate) => {
+            const tempHorizLen = candidate.length * Math.cos(candidate.slope);
+            const centerOffset = this.currentDir.clone().multiplyScalar(tempHorizLen / 2);
+            const projectedCenter = this.currentPos.clone().add(centerOffset);
             
-            // If turn, cancel turn and go straight up to clear obstacle
-            if (type === 'turn') {
-                type = 'straight';
-                length = 100; // Long bridge
+            return !this.checkCollision({
+                center: projectedCenter,
+                width: this.width,
+                length: tempHorizLen,
+                angle: 0
+            }, this.currentPos.y);
+        };
+
+        const rand = Math.random();
+        let primary = {};
+
+        // 1. Generate Primary Wish
+        if (rand > 0.6) { // Turn
+            primary = {
+                type: 'turn',
+                turnDir: Math.random() > 0.5 ? 1 : -1,
+                length: 50 + Math.random() * 30,
+                slope: 0
+            };
+        } else { // Straight
+            const slopeRand = Math.random();
+            let s = 0;
+            if (slopeRand < 0.3) s = 0.2;
+            else if (slopeRand < 0.6) s = -0.2;
+            
+            primary = {
+                type: 'straight',
+                length: 80 + Math.random() * 60,
+                turnDir: 0,
+                slope: s
+            };
+        }
+
+        // 2. List Candidates (Primary + Evasive maneuvers)
+        const candidates = [
+            primary,
+            // Try simple straight if primary was turn (or just as backup)
+            { type: 'straight', length: 60, slope: 0 },
+            // Try opposite turn if primary was turn
+            (primary.type === 'turn') ? { ...primary, turnDir: -primary.turnDir } : null,
+            // Try Turn Left with short approach
+            { type: 'turn', length: 30, turnDir: 1, slope: 0 },
+            // Try Turn Right with short approach
+            { type: 'turn', length: 30, turnDir: -1, slope: 0 }
+        ];
+
+        let selectedParams = null;
+        for(let c of candidates) {
+            if (c && checkCandidate(c)) {
+                selectedParams = c;
+                break;
             }
         }
 
-        this.addSegment({ type, length, turnDir, slope });
+        // 3. Last Resort
+        if (!selectedParams) {
+             // If boxed in, force a very steep climb to try and clear it, 
+             // essentially an emergency ramp.
+             selectedParams = { type: 'straight', length: 60, slope: 0.4 };
+        }
+
+        this.addSegment(selectedParams);
     }
 
     getTrackState(position) {
