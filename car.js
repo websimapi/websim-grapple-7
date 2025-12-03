@@ -4,7 +4,6 @@ export class Car {
     constructor(scene) {
         this.scene = scene;
         this.mesh = new THREE.Group();
-        this.mesh.rotation.order = 'YXZ';
         
         // Physics state
         this.position = new THREE.Vector3(0, 1, 0);
@@ -250,8 +249,8 @@ export class Car {
         // State Machine Logic
         this.updateGrapplePhysics(dt);
 
-        let targetRoll = 0;
-        let targetPitch = 0;
+        // Variables for rotation
+        const targetQuat = new THREE.Quaternion();
         
         // 3D Terrain Handling
         const trackState = trackManager.getTrackState(this.position);
@@ -277,7 +276,8 @@ export class Car {
             const crossY = new THREE.Vector3().crossVectors(this.direction, toPost).y;
             const rotDir = crossY > 0 ? -1 : 1; 
 
-            targetRoll = rotDir * 0.35;
+            // Calculate Roll
+            const grappleRoll = rotDir * 0.35;
 
             const pos2D = new THREE.Vector2(this.position.x - postPos.x, this.position.z - postPos.z);
             pos2D.rotateAround(new THREE.Vector2(0,0), rotDir * angleChange);
@@ -302,6 +302,10 @@ export class Car {
             
             this.speed = Math.min(this.speed + 15 * dt, 55);
 
+            // Set Target Rotation (Yaw + Roll)
+            const yaw = Math.atan2(this.direction.x, this.direction.z);
+            targetQuat.setFromEuler(new THREE.Euler(0, yaw, grappleRoll, 'XYZ'));
+
         } else {
             // Linear Motion
             this.speed = THREE.MathUtils.lerp(this.speed, 35, dt * 2);
@@ -321,13 +325,28 @@ export class Car {
                 const diff = roadY - carY;
                 this.position.y += diff * 35 * dt;
                 
-                // Match Pitch
-                targetPitch = -trackState.slope; // Pitch up is negative rotation in 3JS obj usually? 
-                // Track slope is positive for UP.
-                // Car model: Nose is +Z? 
-                // If we rotate X positive, nose goes DOWN (Right Hand Rule). 
-                // So Pitch Up = Negative X rotation.
-                // trackState.slope is radians. Up is positive.
+                // Match Road Orientation (Align Up vector to Road Normal)
+                if (trackState.segment) {
+                    // Get road normal from segment mesh rotation
+                    // PlaneGeometry default normal is (0,0,1). Apply mesh rotation.
+                    const segQuat = new THREE.Quaternion().setFromEuler(trackState.segment.mesh.rotation);
+                    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(segQuat);
+                    
+                    const forward = this.direction.clone().normalize();
+                    // Calculate Right vector: Cross(Normal, Forward). (Y x Z = X)
+                    const right = new THREE.Vector3().crossVectors(normal, forward).normalize();
+                    // Re-calculate Forward to ensure orthogonality: Cross(Right, Normal). (X x Y = Z)
+                    const realForward = new THREE.Vector3().crossVectors(right, normal).normalize();
+                    
+                    // Create rotation matrix from basis vectors (Right, Up, Forward)
+                    // Matches Car Model: +X Right, +Y Up, +Z Front
+                    const rotMat = new THREE.Matrix4().makeBasis(right, normal, realForward);
+                    targetQuat.setFromRotationMatrix(rotMat);
+
+                } else {
+                    const yaw = Math.atan2(this.direction.x, this.direction.z);
+                    targetQuat.setFromEuler(new THREE.Euler(0, yaw, 0, 'XYZ'));
+                }
                 
                 this.verticalVelocity = 0;
             } else {
@@ -336,26 +355,16 @@ export class Car {
                 this.position.y += this.verticalVelocity * dt;
                 
                 // Nose dive when falling
-                targetPitch = 0.5; // Dive
+                const yaw = Math.atan2(this.direction.x, this.direction.z);
+                targetQuat.setFromEuler(new THREE.Euler(0.5, yaw, 0, 'XYZ'));
             }
-            
-            targetRoll = 0;
         }
 
         // Apply Position
         this.mesh.position.copy(this.position);
         
-        // Rotation
-        // Yaw
-        const yaw = Math.atan2(this.direction.x, this.direction.z);
-        this.mesh.rotation.y = yaw;
-
-        // Pitch & Roll Smoothing
-        const currentRoll = this.mesh.rotation.z;
-        const currentPitch = this.mesh.rotation.x;
-        
-        this.mesh.rotation.z = THREE.MathUtils.lerp(currentRoll, targetRoll, dt * 8);
-        this.mesh.rotation.x = THREE.MathUtils.lerp(currentPitch, targetPitch, dt * 8);
+        // Apply Rotation (Smooth Slerp)
+        this.mesh.quaternion.slerp(targetQuat, dt * 10);
     }
 
     fireGrapple(target) {
